@@ -95,7 +95,9 @@ Non-goals:
   `wp-cron.php`. Outbound HTTPS to the model provider is required.
   Outbound HTTPS to source pages is optional (section 4.4).
 - What it talks to: a language model provider through the
-  `indianopinion/llm-json-php` library, under the operator's own API key.
+  `indianopinion/llm-json-php` library, under the operator's own API key,
+  or a summariser the site plugs in through a filter (case 71), in which
+  case it talks to no provider itself.
   Optionally `gen-queue` and `spend-meter` through their public hooks,
   only when present.
 
@@ -345,6 +347,23 @@ CJK characters counts each character as a word divided by 2, rounded up).
 43. The model never writes the attribution, the link, the byline or the
     date. Those come from the record (section 4.6). The prompt says not
     to name the outlet more than once, and only where a claim needs it.
+71. **Pluggable summariser.** The filter `feed_item_brief_summarise` lets
+    a site supply its own summariser. It receives `null`, the request
+    (the prompt messages and the schema of case 37) and the `Item`, and
+    returns an array in the schema of case 37, a `WP_Error` for a
+    failure, or `null` to decline. A non-null result replaces the
+    `llm-json-php` call. The plugin then runs the same output checks
+    (case 41), the same retry rule (case 42), the same cap and kill
+    switch (section 4.8) and the same attribution block as for a model
+    result, and counts the call against the cap. The filter is applied
+    at the moment of the call, so the switch is still read first.
+72. **Running without the library.** When the filter returns a result,
+    the plugin needs no `llm-json-php` classes, no provider setting and
+    no API key, and the settings screen hides those fields. If the
+    library is not installed and the filter returns `null`, the item is
+    requeued with reason `no_summariser` and an admin notice says that a
+    summariser or the library is needed. No draft is written without a
+    summary result.
 
 ### 4.6 The draft and the attribution block
 
@@ -528,7 +547,7 @@ Namespace `IndianOpinion\FeedItemBrief`. Function and hook prefix
   `time()` and `reason()`.
 - `Summariser`: wraps the model call and the output checks; returns a
   `Summary` or throws `CheckFailedException` (with the failure list),
-  `ProviderException`, `CapReachedException`, `DisabledException`.
+  `ProviderException`, `NoSummariserException`, `CapReachedException`, `DisabledException`.
 - `AttributionRenderer`: `render(Attribution $a): string`.
 - Exceptions extend `FeedItemBriefException`.
 
@@ -563,6 +582,7 @@ id is rejected with `_doing_it_wrong()`. The reference adapter has id
 | `feed_item_brief_paywall_phrases` | filter | `string[]` | Case 34 list |
 | `feed_item_brief_not_article_patterns` | filter | `string[]` | Case 31 path patterns |
 | `feed_item_brief_max_age` | filter | `int $seconds` | Default 259200 |
+| `feed_item_brief_summarise` | filter | `?array $result, array $request, Item $item` | Plug in a site's own summariser (case 71). Return null to decline |
 | `feed_item_brief_prompt` | filter | `array $messages, Item $item, string $mode` | Replace or adjust the prompt |
 | `feed_item_brief_length` | filter | `array{min:int,max:int}, string $mode` | Word targets per mode |
 | `feed_item_brief_banned_lines` | filter | `string[]` | Case 41 line prefixes |
@@ -760,7 +780,9 @@ it with `feed_item_brief_prompt`.
   like any other.
 - Runs with or without `gen-queue` and `spend-meter`. Requires
   `indianopinion/llm-json-php` (a `vcs` repository in `composer.json`,
-  bundled in the release zip).
+  never bundled in this repository), unless the site supplies its own
+  summariser through `feed_item_brief_summarise` (case 71), when the
+  library is not needed.
 - Object caches: counters do not rely on an object cache; the counter
   table is the truth.
 
@@ -903,6 +925,12 @@ stub WordPress layer and a fake model client that returns scripted JSON.
 64. (44) A drafted post has the configured type, status, author, title
     source and an excerpt under 300 characters ending at a sentence, and
     no post date set.
+65. (71, 72) With a filter returning a valid array and no library, no
+    provider setting and no key, the item is drafted with the attribution
+    block, the output checks run on the result, and the call counts
+    against the cap. With the filter returning null and no library, the
+    item is requeued as `no_summariser` and no draft exists. With the
+    switch off or the cap reached, the filter is never called.
 
 ## 13. Open questions
 
@@ -914,20 +942,17 @@ To be answered by the builder in `docs/ARCHITECTURE.md`.
 2. Source updates after publish: should the plugin offer an editor a
    one-click "redraft from the updated source" on a published post, or
    only log the update as specified?
-3. Generator without a model: should a site be able to plug in its own
-   summariser through a filter, so the plugin works with no model and no
-   `llm-json-php` dependency at all?
-4. Canonical and SEO: should the plugin offer an opt-in
+3. Canonical and SEO: should the plugin offer an opt-in
    `<link rel="canonical">` to the source, or leave all SEO to the site?
    The default here is none.
-5. Attribution language: should the block's fixed strings ("Source",
+4. Attribution language: should the block's fixed strings ("Source",
    "By", "Published") follow the site language (WordPress i18n, as
    specified) or the source item's language?
-6. Number check across languages: which number-word lists ship in 0.1.0,
+5. Number check across languages: which number-word lists ship in 0.1.0,
    and how does a site add one?
-7. Cap unit: calls (as specified, retries included) or items, and should
+6. Cap unit: calls (as specified, retries included) or items, and should
    link-only drafts have their own separate cap?
-8. Page fetching default: on (better dates and paywall signals) or off
+7. Page fetching default: on (better dates and paywall signals) or off
    (no traffic to publishers unless the operator opts in)?
 
 ## 14. Lessons from production
