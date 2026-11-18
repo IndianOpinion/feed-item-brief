@@ -1,0 +1,25 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - feed-item-brief.php
+        - uninstall.php
+    scanFiles:
+        - vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
+        - vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
+        - vendor/php-stubs/wp-cli-stubs/wp-cli-commands-stubs.php
+        - tests/phpstan-stubs.php
+    bootstrapFiles:
+        - tests/phpstan-bootstrap.php
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        -
+            identifier: requireOnce.fileNotFound
+            # WordPress core files exist only on a WordPress install.
+        -
+            identifier: argument.type
+            message: '#expects literal-string#'
+            path: src/WpdbRepository.php
+            # Table names come from $wpdb->prefix, so the query text cannot be
+            # a literal string. Every value is a placeholder; column names in
+            # update() are checked against ^[a-z_]+$ first.
