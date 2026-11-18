@@ -92,8 +92,12 @@ final class AttributionTest extends TestCase
         self::assertSame(1, substr_count($html, 'feed-item-brief-attribution"'));
         self::assertStringContainsString('rel="nofollow noopener">Example News</a>', $html);
 
-        $kept = apply_filters('the_content', '<div class="feed-item-brief-attribution">x</div>');
-        self::assertSame('<div class="feed-item-brief-attribution">x</div>', $kept, 'not appended twice');
+        self::assertSame($html, apply_filters('the_content', $html), 'not appended twice');
+
+        $emptied = apply_filters('the_content', '<div class="feed-item-brief-attribution">x</div>');
+        self::assertStringContainsString('rel="nofollow noopener">Example News</a>', $emptied, 'a wrapper with its link removed does not count');
+        $typed = apply_filters('the_content', '<p>feed-item-brief-attribution</p>');
+        self::assertStringContainsString('rel="nofollow noopener">Example News</a>', $typed, 'the class name typed as text does not count');
     }
 
     public function testPostsWithoutAttributionMetaAreUntouched(): void

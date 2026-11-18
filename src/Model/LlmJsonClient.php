@@ -75,7 +75,7 @@ final class LlmJsonClient implements ModelClient
         } catch (ChainExhaustedException $e) {
             throw self::map($e->lastError() ?? $e, $e);
         } catch (ConfigurationException $e) {
-            throw new ProviderException('Model configuration error: ' . $e->getMessage(), ProviderException::CONFIG, false, $e);
+            throw new ProviderException('Model configuration error: ' . self::redact($e->getMessage()), ProviderException::CONFIG, false, $e);
         } catch (LlmJsonException $e) {
             throw self::map($e, $e);
         }
@@ -104,7 +104,7 @@ final class LlmJsonClient implements ModelClient
             return new ProviderException('Provider error (HTTP ' . $status . ').', ProviderException::TRANSIENT, true, $previous);
         }
         if ($error instanceof ConfigurationException) {
-            return new ProviderException('Model configuration error: ' . $error->getMessage(), ProviderException::CONFIG, false, $previous);
+            return new ProviderException('Model configuration error: ' . self::redact($error->getMessage()), ProviderException::CONFIG, false, $previous);
         }
         $reached = !$error instanceof TransportException;
 

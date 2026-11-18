@@ -99,7 +99,7 @@ final class Drafter
             }
             $args['post_status'] = $status;
         }
-        unset($args['post_date'], $args['post_date_gmt']);
+        unset($args['ID'], $args['import_id'], $args['post_date'], $args['post_date_gmt']);
         $args['meta_input'] = array_merge(is_array($args['meta_input'] ?? null) ? $args['meta_input'] : [], [
             Meta::RECORD => $record->id,
             Meta::SOURCE_URL => $item->url(),

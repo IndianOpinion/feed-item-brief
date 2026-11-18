@@ -96,23 +96,62 @@ final class AttributionRenderer
      */
     public static function linksSource(string $html, Attribution $a): bool
     {
+        $doc = self::load($html);
+
+        return $doc !== null && self::anchorsLink($doc->getElementsByTagName('a'), $a);
+    }
+
+    /**
+     * True when $html holds the attribution wrapper and, inside it, the link
+     * to the source (case 46). A wrapper class typed into the text, or a
+     * wrapper whose link was edited out, does not count.
+     */
+    public static function containsBlock(string $html, Attribution $a): bool
+    {
+        if (!str_contains($html, self::WRAPPER)) {
+            return false;
+        }
+        $doc = self::load($html);
+        if ($doc === null) {
+            return false;
+        }
+        $xpath = new \DOMXPath($doc);
+        $anchors = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " ' . self::WRAPPER . ' ")]//a');
+
+        return $anchors instanceof \DOMNodeList && self::anchorsLink($anchors, $a);
+    }
+
+    private static function load(string $html): ?\DOMDocument
+    {
         $doc = new \DOMDocument();
         $previous = libxml_use_internal_errors(true);
         $loaded = $doc->loadHTML('<?xml encoding="UTF-8"?><div>' . $html . '</div>', LIBXML_NONET | LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         libxml_clear_errors();
         libxml_use_internal_errors($previous);
-        if ($loaded === false) {
-            return false;
-        }
+
+        return $loaded === false ? null : $doc;
+    }
+
+    /**
+     * @param iterable<mixed> $anchors
+     */
+    private static function anchorsLink(iterable $anchors, Attribution $a): bool
+    {
         $want = [$a->sourceUrl, html_entity_decode(esc_url($a->sourceUrl), ENT_QUOTES | ENT_HTML5, 'UTF-8')];
         $name = mb_strtolower(trim($a->sourceName), 'UTF-8');
-        foreach ($doc->getElementsByTagName('a') as $anchor) {
+        if ($name === '') {
+            return false;
+        }
+        foreach ($anchors as $anchor) {
+            if (!$anchor instanceof \DOMElement) {
+                continue;
+            }
             $href = trim($anchor->getAttribute('href'));
             if (!in_array($href, $want, true)) {
                 continue;
             }
             $text = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $anchor->textContent) ?? ''), 'UTF-8');
-            if ($name !== '' && str_contains($text, $name)) {
+            if (str_contains($text, $name)) {
                 return true;
             }
         }

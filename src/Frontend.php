@@ -79,7 +79,7 @@ final class Frontend
             return $content;
         }
         $attribution = Attribution::fromPost((int) $post->ID);
-        if ($attribution === null || str_contains($content, AttributionRenderer::WRAPPER)) {
+        if ($attribution === null || AttributionRenderer::containsBlock($content, $attribution)) {
             return $content;
         }
 
