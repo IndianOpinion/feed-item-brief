@@ -36,7 +36,8 @@ class PageFetcher
         if ($code < 200 || $code > 299) {
             return ['page' => null, 'reason' => 'http_' . $code];
         }
-        $type = strtolower((string) wp_remote_retrieve_header($response, 'content-type'));
+        $type = wp_remote_retrieve_header($response, 'content-type');
+        $type = strtolower(is_array($type) ? (string) end($type) : $type);
         if ($type !== '' && !str_contains($type, 'html')) {
             return ['page' => null, 'reason' => 'not_html'];
         }

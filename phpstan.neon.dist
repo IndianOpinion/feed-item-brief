@@ -1,5 +1,5 @@
 parameters:
-    level: 6
+    level: 8
     paths:
         - src
         - feed-item-brief.php
@@ -16,3 +16,10 @@ parameters:
         -
             identifier: requireOnce.fileNotFound
             # WordPress core files exist only on a WordPress install.
+        -
+            identifier: argument.type
+            message: '#expects literal-string#'
+            path: src/WpdbRepository.php
+            # Table names come from $wpdb->prefix, so the query text cannot be
+            # a literal string. Every value is a placeholder; column names in
+            # update() are checked against ^[a-z_]+$ first.

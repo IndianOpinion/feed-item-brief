@@ -124,7 +124,7 @@ final class Installer
             WpdbRepository::dailyTable($db) => self::DAILY_COLUMNS,
         ];
         foreach ($tables as $table => $columns) {
-            $present = $db->get_col('SHOW COLUMNS FROM `' . esc_sql($table) . '`', 0);
+            $present = $db->get_col('SHOW COLUMNS FROM `' . self::ident($table) . '`', 0);
             $present = array_map('strval', is_array($present) ? $present : []);
             foreach ($columns as $column) {
                 if (!in_array($column, $present, true)) {
@@ -145,7 +145,16 @@ final class Installer
 
     public static function drop(\wpdb $db): void
     {
-        $db->query('DROP TABLE IF EXISTS `' . esc_sql(WpdbRepository::itemsTable($db)) . '`');
-        $db->query('DROP TABLE IF EXISTS `' . esc_sql(WpdbRepository::dailyTable($db)) . '`');
+        $db->query('DROP TABLE IF EXISTS `' . self::ident(WpdbRepository::itemsTable($db)) . '`');
+        $db->query('DROP TABLE IF EXISTS `' . self::ident(WpdbRepository::dailyTable($db)) . '`');
+    }
+
+    /**
+     * A table name for a backtick-quoted identifier: only the characters a
+     * WordPress table prefix may hold.
+     */
+    private static function ident(string $name): string
+    {
+        return (string) preg_replace('/[^A-Za-z0-9_$]/', '', $name);
     }
 }

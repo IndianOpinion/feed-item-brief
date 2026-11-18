@@ -176,16 +176,37 @@ importer / adapter / manual / CLI
 20. **Stale retry keeps the real date.** Retrying a `stale` record sets an
     "ignore age" flag on the record; the resolved time and the attribution
     are not changed.
-21. **Companion contracts.** gen-queue: `gen_queue_enqueue($type,
-    $payload, ['idempotency_key' => ...])`, handler through
-    `gen_queue_register_handler()` when present and the action
-    `gen_queue_handle_feed_item_brief.summarise`. spend-meter:
-    `SPEND_METER_API` version 1, `spend_meter_pre_spend(['purpose',
-    'caller'])` returning `['allowed' => true, 'reservation_id' => ...]`,
-    then `spend_meter_record($id, $usage)` or `spend_meter_release($id)`.
-    These names come from the PRD; anything else in a reply is a deny or a
-    failed enqueue. A failed enqueue schedules one run of the plugin's own
-    queue so the item is not stranded.
+21. **Companion contracts**, checked against the released gen-queue 0.1.0
+    and spend-meter 0.1.0.
+    - gen-queue: the job type `feed_item_brief.summarise` is registered with
+      `gen_queue_register_type()` on `gen_queue_register_types`; its
+      handler receives gen-queue's `Job` (record id in `payload`) and
+      `JobContext` and returns an array (`record_id`, `status`). Jobs are
+      enqueued with `gen_queue_enqueue($type, ['record_id' => ...],
+      ['idempotency_key' => <article key hash>])`; only a positive integer
+      id counts as queued. A failed enqueue schedules one run of the
+      plugin's own queue so the item is not stranded.
+    - Records gen-queue no longer holds (put back in the queue by back-off,
+      the cap, a pause or a spend-meter deny, retried from the log, or
+      paused when the switch was off) are picked up by single runs of the
+      plugin's own queue: one is scheduled when a job leaves its record
+      queued, after a retry, after the settings are saved and by the daily
+      clean-up. The recurring own runner stays off while gen-queue is used.
+      A re-enqueue would not work: the idempotency key returns the first,
+      finished job.
+    - spend-meter, contract `SPEND_METER_API` 1: before each call
+      `apply_filters('spend_meter_pre_spend', null, $intent)` with
+      `purpose` `feed-item-brief.summarise`, `caller` `feed-item-brief`,
+      the configured `provider` and `model` (`site-summariser` when no
+      model is set), `est_input_tokens` (prompt characters divided by
+      four) and `max_output_tokens` 1024. `null` means no meter answered,
+      so the plugin's own cap and switch, already passed, decide. Only
+      `allowed === true` allows. After the call,
+      `do_action('spend_meter_record', [...])` with the `reservation_id`,
+      `status` (`ok`, `error_billed`, or `error_unbilled` with
+      `http_status` 401 or 402 for an auth or credit refusal) and the
+      token usage; or `do_action('spend_meter_release', $id)` when the call
+      never reached the provider or the slot is given back.
 22. **Closed on money.** An unreadable switch option is off; an unreadable
     cap is 0; a counter error is "cap reached"; a spend-meter error is a
     deny.
@@ -205,6 +226,20 @@ importer / adapter / manual / CLI
     server in CI (and locally when `FIB_TEST_DB_*` is set). SimplePie is a
     development dependency so the core adapter is tested on real RSS 2.0
     and Atom fixtures.
+27. **What counts as attribution on output.** The `the_content` guard looks
+    for the wrapper class and, inside it, a link to the source URL whose
+    text holds the source name. A wrapper left behind with its link edited
+    out, or the class name typed as text, does not count, and the block is
+    appended.
+28. **Prompt hygiene.** The title goes inside the data markers. The
+    publisher name, which sits outside them, is cut to one line with the
+    markers removed, so feed text cannot open or close the data block.
+29. **Draft inserts only.** `ID` and `import_id` are removed from the
+    filtered insert arguments, so `feed_item_brief_post_args` cannot turn
+    the insert into an update of another post.
+30. **Static analysis** runs at PHPStan level 8. The one ignored rule is
+    `literal-string` for `wpdb::prepare()` in `WpdbRepository`: table names
+    come from the site prefix, and every value is a placeholder.
 
 ## What is not implemented
 

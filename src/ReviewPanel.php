@@ -143,7 +143,7 @@ final class ReviewPanel
         $format = (string) get_option('date_format', 'F j, Y') . ' ' . (string) get_option('time_format', 'g:i a');
         echo '<div class="feed-item-brief-review">';
         echo '<p><strong>' . esc_html__('Source', 'feed-item-brief') . ':</strong> <a href="' . esc_url((string) $d['source_url']) . '" target="_blank" rel="noopener noreferrer">' . esc_html((string) $d['source_name']) . '</a></p>';
-        $byline = is_array($d['byline']) ? Byline::join($d['byline']) : '';
+        $byline = is_array($d['byline']) ? Byline::join(array_values(array_filter($d['byline'], 'is_string'))) : '';
         echo '<p><strong>' . esc_html__('Byline', 'feed-item-brief') . ':</strong> ' . esc_html($byline !== '' ? $byline : __('none given', 'feed-item-brief')) . '</p>';
         echo '<p><strong>' . esc_html__('Published', 'feed-item-brief') . ':</strong> ' . esc_html((string) wp_date($format, (int) $d['resolved'])) . '</p>';
         if ($d['date_review'] === true) {

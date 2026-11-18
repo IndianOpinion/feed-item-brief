@@ -206,7 +206,7 @@ final class PageMeta
         $attrs = [];
         if (preg_match_all('/([A-Za-z_:][A-Za-z0-9_:.\-]*)\s*=\s*("([^"]*)"|\'([^\']*)\'|([^\s>]+))/s', $tag, $m, PREG_SET_ORDER) > 0) {
             foreach ($m as $match) {
-                $value = $match[3] !== '' ? $match[3] : (($match[4] ?? '') !== '' ? $match[4] : ($match[5] ?? ''));
+                $value = ($match[3] ?? '') !== '' ? ($match[3] ?? '') : (($match[4] ?? '') !== '' ? $match[4] : ($match[5] ?? ''));
                 $attrs[strtolower($match[1])] = $value;
             }
         }
