@@ -78,7 +78,7 @@ final class Summariser
         $failures = [];
 
         for ($attempt = 1; $attempt <= self::MAX_CALLS; $attempt++) {
-            $reservation = $this->gate->acquire($ignoreCap);
+            $reservation = $this->gate->acquire($ignoreCap, self::estimateTokens($messages));
             try {
                 $response = $this->call($messages, $schema, $item);
             } catch (NoSummariserException $e) {
@@ -89,7 +89,12 @@ final class Summariser
                     $this->gate->refund($reservation);
                 } else {
                     $this->calls++;
-                    $this->gate->settle($reservation, $e->reachedProvider());
+                    $refused = match ($e->kind()) {
+                        ProviderException::AUTH => 401,
+                        ProviderException::CREDIT => 402,
+                        default => null,
+                    };
+                    $this->gate->settle($reservation, $e->reachedProvider(), null, null, $refused !== null ? 'error_unbilled' : 'error_billed', $refused);
                 }
                 if ($e->kind() === ProviderException::AUTH) {
                     $this->gate->pause(Status::AUTH_FAILED, $e->getMessage());
@@ -122,6 +127,21 @@ final class Summariser
         }
 
         throw new CheckFailedException($failures);
+    }
+
+    /**
+     * A rough input token estimate for spend-meter: four characters a token.
+     *
+     * @param list<array{role: string, content: string}> $messages
+     */
+    private static function estimateTokens(array $messages): int
+    {
+        $chars = 0;
+        foreach ($messages as $message) {
+            $chars += mb_strlen($message['content'], 'UTF-8');
+        }
+
+        return intdiv($chars, 4) + 1;
     }
 
     /**

@@ -16,6 +16,8 @@ final class Reservation
         public readonly string $day,
         public readonly ?string $spendId,
         public readonly bool $spendMeter,
+        /** @var array<string, mixed> the spend-meter intent, empty when no meter */
+        public readonly array $intent = [],
     ) {
     }
 }

@@ -18,6 +18,9 @@ final class Gate
 {
     public const PAUSE_SECONDS = 3600;
 
+    /** Output ceiling sent to spend-meter for its estimate. */
+    public const MAX_OUTPUT_TOKENS = 1024;
+
     public function __construct(
         private readonly Settings $settings,
         private readonly Repository $repository,
@@ -72,7 +75,7 @@ final class Gate
      * @throws CapReachedException
      * @throws SpendDeniedException
      */
-    public function acquire(bool $ignoreCap = false): Reservation
+    public function acquire(bool $ignoreCap = false, int $estInputTokens = 0): Reservation
     {
         $this->check();
         $day = $this->day();
@@ -87,13 +90,14 @@ final class Gate
             throw new CapReachedException();
         }
         if ($this->spendMeter->present()) {
-            $decision = $this->spendMeter->preSpend();
+            $intent = SpendMeter::intent($this->settings->string('provider'), $this->settings->model(), $estInputTokens, self::MAX_OUTPUT_TOKENS);
+            $decision = $this->spendMeter->preSpend($intent);
             if (!$decision['allowed']) {
                 $this->repository->refundCall($day);
                 throw new SpendDeniedException();
             }
 
-            return new Reservation($day, $decision['id'], true);
+            return new Reservation($day, $decision['id'], true, $intent);
         }
 
         return new Reservation($day, null, false);
@@ -116,9 +120,17 @@ final class Gate
 
     /**
      * After the call: record usage, or release when it never reached the provider.
+     *
+     * @param string $status spend-meter call status: ok, error_billed or error_unbilled
      */
-    public function settle(Reservation $reservation, bool $reachedProvider, ?int $promptTokens = null, ?int $completionTokens = null): void
-    {
+    public function settle(
+        Reservation $reservation,
+        bool $reachedProvider,
+        ?int $promptTokens = null,
+        ?int $completionTokens = null,
+        string $status = 'ok',
+        ?int $httpStatus = null,
+    ): void {
         if ($reservation->settled) {
             return;
         }
@@ -127,7 +139,7 @@ final class Gate
             return;
         }
         if ($reachedProvider) {
-            $this->spendMeter->record($reservation->spendId, $promptTokens, $completionTokens);
+            $this->spendMeter->record($reservation->spendId, $reservation->intent, $status, $promptTokens, $completionTokens, $httpStatus);
         } else {
             $this->spendMeter->release($reservation->spendId);
         }

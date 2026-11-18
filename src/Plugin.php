@@ -233,13 +233,54 @@ final class Plugin
     }
 
     /**
-     * gen-queue job handler: the same pipeline for one record.
+     * gen-queue job handler: the same pipeline for one record. A record the
+     * pipeline puts back in the queue (back-off, cap, pause) is no longer
+     * held by gen-queue, whose job has ended, so one run of the plugin's own
+     * queue is scheduled for when it is due.
+     *
+     * @return array{record_id: int, status: string|null}
      */
-    public function handleJob(mixed $payload): mixed
+    public function handleJob(mixed $job, mixed $context = null): array
     {
-        $id = is_array($payload) && is_numeric($payload['record_id'] ?? null) ? (int) $payload['record_id'] : 0;
+        $id = GenQueue::recordId($job);
+        $status = $id > 0 ? $this->processor->processNow($id) : null;
+        if ($id > 0) {
+            $record = $this->repository->find($id);
+            if ($record !== null && $record->finalAt === null) {
+                $this->kick(max($record->notBefore, time() + 60));
+            }
+        }
 
-        return $id > 0 ? $this->processor->processNow($id) : null;
+        return ['record_id' => $id, 'status' => $status];
+    }
+
+    /**
+     * Schedule one run of the plugin's own queue while gen-queue is in use,
+     * for records gen-queue no longer holds: requeued, paused or retried.
+     */
+    public function kick(?int $when = null): void
+    {
+        if (!$this->genQueue->active()) {
+            return;
+        }
+        $when ??= time() + 30;
+        $next = wp_next_scheduled(self::CRON_RUN);
+        if ($next === false || $next > $when) {
+            wp_schedule_single_event($when, self::CRON_RUN);
+        }
+    }
+
+    /**
+     * Log screen and WP-CLI retry.
+     */
+    public function retry(int $id): bool
+    {
+        $ok = $this->processor->retry($id);
+        if ($ok) {
+            $this->kick();
+        }
+
+        return $ok;
     }
 
     /**
@@ -307,6 +348,7 @@ final class Plugin
         $now = $this->clock->now()->getTimestamp();
         $bodyDays = max(1, (int) apply_filters('feed_item_brief_body_retention_days', 7));
         $rowDays = max(1, (int) apply_filters('feed_item_brief_row_retention_days', 90));
+        $this->kick();
         try {
             $this->repository->purgeBodies($now - $bodyDays * DAY_IN_SECONDS);
             $this->repository->purgeRows($now - $rowDays * DAY_IN_SECONDS);

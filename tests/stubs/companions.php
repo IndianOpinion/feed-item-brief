@@ -1,32 +1,28 @@
 <?php
 
 /**
- * Stand-ins for the public functions of the optional gen-queue and
- * spend-meter plugins. SPEND_METER_API stays undefined, so the plugin
- * treats spend-meter as absent unless a test injects its own meter.
+ * Stand-ins for the public functions of the optional gen-queue plugin.
+ * spend-meter is reached through hooks only, so tests hook
+ * spend_meter_pre_spend themselves. SPEND_METER_API stays undefined, so the
+ * plugin treats spend-meter as absent unless a test injects its own meter.
  */
 
 declare(strict_types=1);
 
 if (!function_exists('gen_queue_enqueue')) {
-    function gen_queue_enqueue(string $type, array $payload, array $options = []): mixed
+    function gen_queue_enqueue(string $type, array $payload, array $args = []): int
     {
         if (!empty($GLOBALS['fib_test_refuse'])) {
-            return new \WP_Error('refused', 'Queue full');
+            throw new \RuntimeException('Queue full');
         }
-        $GLOBALS['fib_test_jobs'][] = [$type, $payload, $options];
+        $GLOBALS['fib_test_jobs'][] = [$type, $payload, $args];
 
         return count($GLOBALS['fib_test_jobs']);
     }
 }
-if (!function_exists('spend_meter_pre_spend')) {
-    function spend_meter_pre_spend(array $args): mixed
+if (!function_exists('gen_queue_register_type')) {
+    function gen_queue_register_type(string $type, callable $handler, array $args = []): void
     {
-        $answer = $GLOBALS['fib_test_spend'] ?? null;
-        if ($answer instanceof \Throwable) {
-            throw $answer;
-        }
-
-        return $answer;
+        $GLOBALS['fib_test_types'][$type] = $handler;
     }
 }

@@ -189,7 +189,7 @@ final class Command
     public function retry(array $args, array $assoc): void
     {
         $id = (int) ($args[0] ?? 0);
-        if (!$this->plugin->processor->retry($id)) {
+        if (!$this->plugin->retry($id)) {
             \WP_CLI::error('That record does not exist or cannot be retried.');
         }
         \WP_CLI::success('Record ' . $id . ' is queued.');

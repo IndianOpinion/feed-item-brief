@@ -8,7 +8,10 @@ use IndianOpinion\FeedItemBrief\Settings;
 
 /**
  * Optional integration with the gen-queue plugin (case 55), through its
- * public function only, loaded only when present.
+ * public functions and actions only, loaded only when present:
+ * `gen_queue_register_type()` on `gen_queue_register_types`, and
+ * `gen_queue_enqueue()` with an idempotency key. The handler receives
+ * gen-queue's job and context objects.
  */
 class GenQueue
 {
@@ -31,24 +34,44 @@ class GenQueue
         try {
             $result = \gen_queue_enqueue(self::JOB_TYPE, ['record_id' => $recordId], ['idempotency_key' => $keyHash]);
         } catch (\Throwable $e) {
-            error_log('[feed-item-brief] gen_queue_enqueue failed: ' . $e->getMessage());
+            error_log('[feed-item-brief] gen_queue_enqueue failed: ' . get_class($e));
 
             return false;
         }
 
-        return $result !== false && $result !== null && !($result instanceof \WP_Error);
+        return is_int($result) && $result > 0;
     }
 
     /**
-     * Register the job handler with gen-queue.
+     * Register the job type when gen-queue asks for types.
      *
-     * @param callable(mixed): mixed $handler
+     * @param callable $handler called with gen-queue's Job and JobContext
      */
     public function registerHandler(callable $handler): void
     {
-        if (function_exists('gen_queue_register_handler')) {
-            \gen_queue_register_handler(self::JOB_TYPE, $handler);
+        add_action('gen_queue_register_types', static function () use ($handler): void {
+            if (!function_exists('gen_queue_register_type')) {
+                return;
+            }
+            try {
+                \gen_queue_register_type(self::JOB_TYPE, $handler);
+            } catch (\Throwable $e) {
+                error_log('[feed-item-brief] gen_queue_register_type failed: ' . get_class($e));
+            }
+        });
+    }
+
+    /**
+     * The record id from a gen-queue job (an object with a `payload`
+     * array) or from a bare payload array.
+     */
+    public static function recordId(mixed $job): int
+    {
+        $payload = is_object($job) && isset($job->payload) ? $job->payload : $job;
+        if (!is_array($payload) || !is_numeric($payload['record_id'] ?? null)) {
+            return 0;
         }
-        add_action('gen_queue_handle_' . self::JOB_TYPE, $handler);
+
+        return max(0, (int) $payload['record_id']);
     }
 }

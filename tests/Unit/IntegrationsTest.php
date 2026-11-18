@@ -21,22 +21,25 @@ final class ScriptedSpendMeter extends SpendMeter
     public array $decisions = [];
     /** @var list<string> */
     public array $log = [];
+    /** @var list<array<string, mixed>> */
+    public array $intents = [];
 
     public function present(): bool
     {
         return true;
     }
 
-    public function preSpend(): array
+    public function preSpend(array $intent): array
     {
         $this->log[] = 'pre';
+        $this->intents[] = $intent;
 
         return array_shift($this->decisions) ?? ['allowed' => false, 'id' => null];
     }
 
-    public function record(?string $id, ?int $promptTokens, ?int $completionTokens): void
+    public function record(?string $id, array $intent, string $status, ?int $inputTokens, ?int $outputTokens, ?int $httpStatus = null): void
     {
-        $this->log[] = 'record:' . $id . ':' . $promptTokens . ':' . $completionTokens;
+        $this->log[] = 'record:' . $id . ':' . $status . ':' . $inputTokens . ':' . $outputTokens;
     }
 
     public function release(?string $id): void
@@ -60,8 +63,14 @@ final class IntegrationsTest extends TestCase
         $record = $this->record((int) $submission->recordId());
         self::assertSame([[GenQueue::JOB_TYPE, ['record_id' => $record->id], ['idempotency_key' => $record->keyHash]]], $GLOBALS['fib_test_jobs']);
 
+        $this->plugin->init();
+        do_action('gen_queue_register_types');
+        self::assertArrayHasKey(GenQueue::JOB_TYPE, $GLOBALS['fib_test_types']);
+        $job = new \stdClass();
+        $job->payload = ['record_id' => $record->id];
         $this->model->queue(self::goodAnswer());
-        $this->plugin->handleJob(['record_id' => $record->id]);
+        $result = ($GLOBALS['fib_test_types'][GenQueue::JOB_TYPE])($job, null);
+        self::assertSame(['record_id' => $record->id, 'status' => Status::DRAFTED], $result);
         self::assertSame(Status::DRAFTED, $this->record($record->id)->status);
 
         $this->settings(['use_gen_queue' => false]);
@@ -102,7 +111,10 @@ final class IntegrationsTest extends TestCase
         $meter->log = [];
         $this->model->queue(self::goodAnswer());
         $this->plugin->processor->run();
-        self::assertSame(['pre', 'record:r1:100:50'], $meter->log);
+        self::assertSame(['pre', 'record:r1:ok:100:50'], $meter->log);
+        self::assertSame('feed-item-brief.summarise', $meter->intents[0]['purpose']);
+        self::assertSame('feed-item-brief', $meter->intents[0]['caller']);
+        self::assertGreaterThan(0, $meter->intents[0]['est_input_tokens']);
         self::assertSame(Status::DRAFTED, $this->record(1)->status);
     }
 
@@ -123,14 +135,63 @@ final class IntegrationsTest extends TestCase
     public function testUnknownSpendMeterShapeIsADeny(): void
     {
         $meter = new SpendMeter();
-        foreach ([null, 'yes', ['allowed' => 'true'], ['allowed' => 1], new \WP_Error('x', 'y')] as $answer) {
-            $GLOBALS['fib_test_spend'] = $answer;
-            self::assertFalse($meter->preSpend()['allowed'], var_export($answer, true));
+        $intent = SpendMeter::intent('openrouter', 'some/model', 100, 1024);
+        $answer = null;
+        add_filter('spend_meter_pre_spend', static function (mixed $value, mixed $given) use (&$answer, $intent): mixed {
+            self::assertNull($value);
+            self::assertSame($intent, $given);
+            if ($answer instanceof \Throwable) {
+                throw $answer;
+            }
+
+            return $answer;
+        }, 10, 2);
+        foreach (['yes', ['allowed' => 'true'], ['allowed' => 1], ['allowed' => false, 'reservation_id' => 'x'], new \WP_Error('x', 'y')] as $answer) {
+            self::assertFalse($meter->preSpend($intent)['allowed'], var_export($answer, true));
         }
-        $GLOBALS['fib_test_spend'] = new \RuntimeException('boom');
-        self::assertFalse($meter->preSpend()['allowed']);
-        $GLOBALS['fib_test_spend'] = ['allowed' => true, 'reservation_id' => 9];
-        self::assertSame(['allowed' => true, 'id' => '9'], $meter->preSpend());
+        $answer = new \RuntimeException('boom');
+        self::assertFalse($meter->preSpend($intent)['allowed']);
+        $answer = null;
+        self::assertSame(['allowed' => true, 'id' => null], $meter->preSpend($intent), 'null means no meter answered');
+        $answer = ['allowed' => true, 'reason' => 'ok', 'reservation_id' => 'abc'];
+        self::assertSame(['allowed' => true, 'id' => 'abc'], $meter->preSpend($intent));
         self::assertFalse($meter->present(), 'needs SPEND_METER_API with a supported version');
+    }
+
+    public function testSpendMeterHooksAreTheContractOnes(): void
+    {
+        $meter = new SpendMeter();
+        $seen = [];
+        add_action('spend_meter_record', static function (mixed $call) use (&$seen): void {
+            $seen[] = ['record', $call];
+        });
+        add_action('spend_meter_release', static function (mixed $id) use (&$seen): void {
+            $seen[] = ['release', $id];
+        });
+        $intent = SpendMeter::intent('OpenRouter', '', 10, 1024);
+        self::assertSame('openrouter', $intent['provider']);
+        self::assertSame(SpendMeter::UNKNOWN_MODEL, $intent['model']);
+        $meter->record('res-1', $intent, 'ok', 100, 50, 200);
+        $meter->release('res-2');
+        $meter->release(null);
+        self::assertSame('record', $seen[0][0]);
+        self::assertSame('res-1', $seen[0][1]['reservation_id']);
+        self::assertSame('ok', $seen[0][1]['status']);
+        self::assertSame(100, $seen[0][1]['input_tokens']);
+        self::assertSame(50, $seen[0][1]['output_tokens']);
+        self::assertSame('feed-item-brief', $seen[0][1]['caller']);
+        self::assertSame(['release', 'res-2'], $seen[1]);
+        self::assertCount(2, $seen);
+    }
+
+    public function testRequeuedJobRecordKicksTheOwnQueue(): void
+    {
+        $GLOBALS['fib_test_jobs'] = [];
+        $this->settings(['use_gen_queue' => true]);
+        $submission = $this->plugin->submit($this->item(), 'core-feed');
+        $this->model->queue(new \IndianOpinion\FeedItemBrief\Exception\ProviderException('HTTP 503', 'transient', true));
+        $this->plugin->handleJob(['record_id' => (int) $submission->recordId()]);
+        self::assertSame(Status::QUEUED, $this->record((int) $submission->recordId())->status);
+        self::assertSame(Plugin::CRON_RUN, \WpStub::$single[0][0]);
     }
 }

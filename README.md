@@ -253,10 +253,13 @@ drops the tables, options, transients and cron events, and keeps posts.
   source, not only in the sentence the claim came from.
 - The page parser reads the head, JSON-LD blocks and the first `<time>` in
   the first `<article>`. It is not an extraction engine.
-- The gen-queue and spend-meter integrations call their public functions
-  (`gen_queue_enqueue`, `spend_meter_pre_spend`, `spend_meter_record`,
-  `spend_meter_release`) only when present. Anything they return that the
-  plugin does not understand is treated as a refusal.
+- The gen-queue integration uses `gen_queue_register_type()` on
+  `gen_queue_register_types` and `gen_queue_enqueue()`, only when present.
+  The spend-meter integration (contract `SPEND_METER_API` 1) uses the
+  `spend_meter_pre_spend` filter with an intent array, then the
+  `spend_meter_record` or `spend_meter_release` action. A `null` decision
+  means no meter answered; anything else the plugin does not understand
+  is treated as a refusal.
 - The block editor script has no build step and is not covered by the PHP
   tests.
 

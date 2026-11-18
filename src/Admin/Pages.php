@@ -153,6 +153,7 @@ final class Pages
             $settings->setEnabled($wantOn);
         }
         $this->plugin->schedule();
+        $this->plugin->kick();
         wp_safe_redirect(add_query_arg(['page' => 'feed-item-brief', 'fib' => $message], admin_url('options-general.php')));
         exit;
     }
@@ -343,7 +344,7 @@ final class Pages
             wp_die(esc_html__('You are not allowed to do this.', 'feed-item-brief'), 403);
         }
         check_admin_referer('feed_item_brief_retry_' . $id);
-        $ok = $this->plugin->processor->retry($id);
+        $ok = $this->plugin->retry($id);
         wp_safe_redirect(add_query_arg(['page' => 'feed-item-brief-log', 'fib' => $ok ? 'retried' : 'not_retried'], admin_url('tools.php')));
         exit;
     }
